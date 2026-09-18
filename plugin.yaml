@@ -1,5 +1,5 @@
 name: gbrain-retrieval-reflex
-version: 0.6.0
+version: 0.6.1
 description: >-
   Ambient GBrain push-context: HTTP MCP volunteer_context (entity, multi-turn)
   + hybrid query fallback, merge/dedupe, inject top-N strength-ordered Brain
