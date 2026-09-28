@@ -1,14 +1,16 @@
 """gbrain-retrieval-reflex — ambient push-context for Hermes.
 
-Under HTTP sole-owner (gbrain serve --http), resolve IPC sock is NOT bound
-(upstream 0.42.x: startResolveIpcServer only on stdio). So ambient path is:
+The resolve IPC sock is bound by both serve transports (stdio and
+`gbrain serve --http`) as of upstream #4474, so a live sock beside the state
+directory is normal under HTTP sole-owner. The ambient path stays HTTP-first:
 
   user turn → HTTP MCP volunteer_context (entity resolve, multi-turn window)
            → HTTP MCP query (hybrid topical fallback)
            → merge/dedupe, rank top-N by strength
            → inject ## Brain pages (ambient push) into pre_llm_call context
 
-Optional fast path: if .gbrain-resolve.sock exists, use resolve IPC first.
+Optional fast path: when a .gbrain-resolve.sock exists, resolve IPC is the
+fallback for a turn whose HTTP calls returned no pages.
 
 Never shells gbrain CLI; never opens PGLite itself.
 """
@@ -169,7 +171,8 @@ def on_pre_llm_call(
                 )
                 return {"context": context, "target": "user_message"}
 
-        # Optional IPC if sock exists (stdio serve builds only).
+        # Optional IPC fallback if the serve's resolve sock exists (both
+        # serve transports bind it since upstream #4474).
         sock = _resolve_socket_path()
         if sock is not None:
             block = _resolve_via_ipc(sock, _extract_candidates_light(text))
@@ -656,7 +659,7 @@ def _format_pages(pages: List[Dict[str, Any]]) -> str:
     return context[:budget]
 
 
-# ── Optional resolve IPC (stdio serve only) ───────────────────────────────
+# ── Optional resolve IPC fallback (sock bound by both serve transports) ───
 
 
 def _extract_candidates_light(text: str) -> List[Dict[str, str]]:
