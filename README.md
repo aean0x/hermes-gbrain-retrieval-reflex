@@ -24,9 +24,10 @@ silently. It never blocks a turn and never raises into the agent loop.
 
 - A **GBrain** instance reachable over **HTTP MCP**, with a bearer token.
   There is no bundled brain: this is the client half.
-- Optional: a `.gbrain-resolve.sock` for the resolve IPC fast path. Current
-  `gbrain serve --http` does not bind it (stdio serve only), so the HTTP path
-  is the normal one.
+- Optional: a `.gbrain-resolve.sock` for the resolve IPC fallback. Both serve
+  transports bind it as of GBrain 0.48.2.0 (upstream #4474), so a live sock is
+  normal under `gbrain serve --http`. The HTTP MCP calls stay the primary
+  path; IPC is only tried for a turn they returned no pages for.
 
 ## Install
 
