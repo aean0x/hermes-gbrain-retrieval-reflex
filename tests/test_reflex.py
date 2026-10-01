@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import stat
 import sys
+import tempfile
 import types
 import unittest
 import urllib.error
@@ -62,7 +64,9 @@ class StatePaths(unittest.TestCase):
             ["/opt/gb/hermes-mcp.token", "/h/.gbrain/hermes-mcp.token",
              "/hh/.gbrain/hermes-mcp.token"],
         )
-        self.assertEqual(envs, ["/hh/.env", "/h/.hermes/.env"])
+        # `$HOME/.hermes` is deliberately absent: reading it would let a
+        # non-default profile pick up the default profile's GBRAIN_TOKEN.
+        self.assertEqual(envs, ["/hh/.env"])
 
     def test_socket_candidates_override_first_then_bases(self):
         env = {
@@ -83,6 +87,47 @@ class StatePaths(unittest.TestCase):
         source = (ROOT / "__init__.py").read_text()
         for leaked in ("/home/", "/var/lib/hermes", "/data/.hermes"):
             self.assertNotIn(leaked, source, f"{leaked} must come from env")
+
+
+class AuditTargets(unittest.TestCase):
+    """The troubleshooting marker must not create state or be pre-plantable."""
+
+    def test_no_predictable_tmp_target(self):
+        targets = [str(p) for p, _ in reflex._audit_targets()]
+        self.assertTrue(targets, "there must be at least one conventional target")
+        for path in targets:
+            self.assertFalse(path.startswith("/tmp/"), path)
+
+    def test_missing_directory_is_not_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            gb = Path(tmp) / "gb"
+            env = {
+                "HOME": str(home),
+                "HERMES_HOME": str(Path(tmp) / "hermes"),
+                "GBRAIN_HOME": str(gb),
+                "GBRAIN_RETRIEVAL_AUDIT": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                reflex._audit({"ok": True, "reason": "test"})
+            self.assertFalse(gb.exists(), "must not create a GBrain state dir")
+            self.assertFalse((home / ".gbrain").exists(), "must not create ~/.gbrain")
+
+    def test_explicit_target_is_created_and_private(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "nested" / "audit.json"
+            env = {
+                "HOME": tmp,
+                "HERMES_HOME": tmp,
+                "GBRAIN_HOME": "",
+                "GBRAIN_RETRIEVAL_AUDIT": str(target),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                reflex._audit({"ok": True, "pages": ["ops/x"]})
+            self.assertTrue(target.is_file(), "a named target may create its directory")
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            self.assertIn("ops/x", target.read_text(encoding="utf-8"))
 
 
 class MessageNormalization(unittest.TestCase):
