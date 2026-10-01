@@ -76,28 +76,31 @@ def _gbrain_dirs() -> tuple[Path, ...]:
 
 
 def _hermes_homes() -> tuple[Path, ...]:
-    """Candidate Hermes homes: `$HERMES_HOME`, then the default `$HOME/.hermes`."""
-    homes: list[Path] = []
+    """Hermes homes to read a `.env` from: `$HERMES_HOME` only.
+
+    Hermes loads the active profile's `.env` into the environment, so the env
+    alone covers the token lookup. Falling back to `$HOME/.hermes` would let a
+    non-default profile read the default profile's `GBRAIN_TOKEN`.
+    """
     raw = os.environ.get("HERMES_HOME", "").strip()
-    if raw:
-        homes.append(Path(raw).expanduser())
-    home = os.environ.get("HOME", "").strip()
-    if home:
-        homes.append(Path(home).expanduser() / ".hermes")
-    return _dedupe(homes)
+    return (Path(raw).expanduser(),) if raw else ()
 
 
-def _audit_paths() -> tuple[Path, ...]:
-    paths: list[Path] = []
+def _audit_targets() -> tuple[tuple[Path, bool], ...]:
+    """Audit targets as ``(path, may_create_parent)``, highest priority first.
+
+    Only a path named by `GBRAIN_RETRIEVAL_AUDIT` may have its directory
+    created. The conventional targets are written where the directory already
+    exists, so a host that does not run GBrain gains no `~/.gbrain`, and no
+    predictable `/tmp` path exists for another local user to pre-plant as a
+    symlink.
+    """
+    targets: list[tuple[Path, bool]] = []
     env = os.environ.get("GBRAIN_RETRIEVAL_AUDIT", "").strip()
     if env:
-        paths.append(Path(env))
-    paths.extend(d / "retrieval-reflex-last.json" for d in _gbrain_dirs())
-    paths.append(Path("/tmp/gbrain-retrieval-reflex-last.json"))
-    return tuple(paths)
-
-
-_AUDIT_PATHS = _audit_paths()
+        targets.append((Path(env).expanduser(), True))
+    targets.extend((d / "retrieval-reflex-last.json", False) for d in _gbrain_dirs())
+    return tuple(targets)
 
 _MCP_URL = os.environ.get("GBRAIN_MCP_URL", "http://127.0.0.1:3131/mcp").strip()
 _SOCK_NAME = ".gbrain-resolve.sock"
@@ -191,15 +194,23 @@ def on_pre_llm_call(
 
 
 def _audit(payload: Dict[str, Any]) -> None:
-    """Best-effort last-inject marker for live troubleshooting."""
+    """Best-effort last-inject marker for live troubleshooting.
+
+    The marker carries page slugs, scores and exception text, so it is written
+    0600 and only into a directory that already exists or that an operator
+    named explicitly.
+    """
     payload = {**payload, "ts": time.time()}
     raw = json.dumps(payload, ensure_ascii=False)
-    for p in _AUDIT_PATHS:
+    for path, may_create_parent in _audit_targets():
         try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(raw + "\n", encoding="utf-8")
+            if not path.parent.is_dir():
+                if not may_create_parent:
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(raw + "\n", encoding="utf-8")
             try:
-                p.chmod(0o644)
+                path.chmod(0o600)
             except OSError:
                 pass
             return
