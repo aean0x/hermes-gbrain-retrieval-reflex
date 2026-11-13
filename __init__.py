@@ -322,6 +322,22 @@ def _read_bearer_token() -> str:
     return ""
 
 
+def _loads_first_doc(text: str) -> Optional[Any]:
+    """json.loads that tolerates trailing non-JSON text in tool output.
+
+    GBrain (>= 0.60.672) appends informational notices such as
+    "[gbrain dates] effective_date by effective_date_source: ..." AFTER the
+    JSON payload of the ``query`` tool's text when the result set is large
+    (~8+ hits). Plain json.loads then raises "Extra data" and the caller
+    silently drops every page. Parse the first JSON document only.
+    """
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text.lstrip())
+        return obj
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def _parse_sse_json(raw: str) -> Optional[Dict[str, Any]]:
     """Parse streamable-HTTP / SSE body for first JSON-RPC object."""
     raw = raw.strip()
@@ -409,9 +425,8 @@ def _volunteer_via_http(window: str) -> List[Dict[str, Any]]:
     )
     if not text_blob:
         return []
-    try:
-        data = json.loads(text_blob)
-    except json.JSONDecodeError:
+    data = _loads_first_doc(text_blob)
+    if data is None:
         return []
     if not isinstance(data, dict):
         return []
@@ -430,9 +445,8 @@ def _query_via_http(user_text: str) -> List[Dict[str, Any]]:
     )
     if not text_blob:
         return []
-    try:
-        data = json.loads(text_blob)
-    except json.JSONDecodeError:
+    data = _loads_first_doc(text_blob)
+    if data is None:
         return []
     hits: List[Any]
     if isinstance(data, list):

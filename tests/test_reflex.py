@@ -250,6 +250,24 @@ class HookGate(unittest.TestCase):
 class Tolerance(unittest.TestCase):
     """GBrain down, or no credentials: silent no-op, never an exception."""
 
+    def test_trailing_notice_after_json_is_tolerated(self):
+        """GBrain >= 0.60.672 appends "[gbrain dates] ..." notices after the
+        JSON payload on large query results; parsing must keep the pages."""
+        blob = (
+            '[{"slug": "concepts/alvar-method", "title": "Alvar", "score": 0.9}]\n'
+            '[gbrain dates] effective_date by effective_date_source: '
+            "date = document date; created = fallback (page c..."
+        )
+        with patch.object(reflex, "_tools_call_text", lambda name, args: blob):
+            pages = reflex._query_via_http("learning methods")
+        self.assertEqual([p["slug"] for p in pages], ["concepts/alvar-method"])
+
+    def test_garbage_blob_yields_no_pages(self):
+        with patch.object(
+            reflex, "_tools_call_text", lambda name, args: "not json at all"
+        ):
+            self.assertEqual(reflex._query_via_http("anything"), [])
+
     def test_http_error_returns_none(self):
         def boom(*a, **k):
             raise urllib.error.URLError("connection refused")
